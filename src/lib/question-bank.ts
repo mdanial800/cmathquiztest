@@ -1,0 +1,871 @@
+import type { TopicId } from './topics'
+
+export interface QuestionOption {
+  text: string
+  /** For a wrong option: the misconception that leads to it. For the right one: why it is right. */
+  why: string
+}
+
+export interface Question {
+  id: string
+  topic: TopicId
+  subskill: string
+  level: 1 | 2 | 3
+  prompt: string
+  options: QuestionOption[]
+  correctIndex: number
+  hint: string
+  steps: string[]
+  keyIdea: string
+  source: 'ai' | 'bank'
+}
+
+type BankQuestion = Omit<Question, 'id' | 'source' | 'topic'>
+
+/**
+ * Hand-checked questions. Used when the AI question generator is unavailable,
+ * and as a reliable baseline for each subskill. All maths text uses $...$ LaTeX.
+ */
+const BANK: Record<TopicId, BankQuestion[]> = {
+  vectors: [
+    {
+      subskill: 'vec-arithmetic',
+      level: 1,
+      prompt:
+        'Given $\\mathbf{a} = (2, -1, 3)$ and $\\mathbf{b} = (1, 4, -2)$, find $2\\mathbf{a} - \\mathbf{b}$.',
+      options: [
+        { text: '$(3, -6, 8)$', why: 'Scale every component of $\\mathbf{a}$ by 2, then subtract component by component.' },
+        { text: '$(5, 2, 4)$', why: 'This is $2\\mathbf{a} + \\mathbf{b}$ — the subtraction was turned into addition.' },
+        { text: '$(1, -5, 5)$', why: 'This is $\\mathbf{a} - \\mathbf{b}$ — the scalar 2 was never applied to $\\mathbf{a}$.' },
+        { text: '$(3, -6, 4)$', why: 'Sign slip in the last component: $6 - (-2) = 8$, not $4$.' },
+      ],
+      correctIndex: 0,
+      hint: 'First compute $2\\mathbf{a}$, then subtract $\\mathbf{b}$ one component at a time. Watch the negatives.',
+      steps: [
+        '$2\\mathbf{a} = (4, -2, 6)$',
+        '$2\\mathbf{a} - \\mathbf{b} = (4-1,\\ -2-4,\\ 6-(-2))$',
+        '$= (3, -6, 8)$',
+      ],
+      keyIdea: 'Vector operations act component by component.',
+    },
+    {
+      subskill: 'vec-magnitude',
+      level: 1,
+      prompt: 'Find the magnitude of $\\mathbf{v} = (3, 4, 12)$.',
+      options: [
+        { text: '$19$', why: 'Adding the components is not the magnitude — you need squares and a square root (Pythagoras).' },
+        { text: '$13$', why: '$\\sqrt{9 + 16 + 144} = \\sqrt{169} = 13$.' },
+        { text: '$169$', why: 'That is $\\|\\mathbf{v}\\|^2$ — the final square root was forgotten.' },
+        { text: '$\\sqrt{19}$', why: 'The components must be squared before adding, not added directly.' },
+      ],
+      correctIndex: 1,
+      hint: 'Magnitude is Pythagoras in 3D: square each component, add, then square-root.',
+      steps: ['$\\|\\mathbf{v}\\| = \\sqrt{3^2 + 4^2 + 12^2}$', '$= \\sqrt{9 + 16 + 144} = \\sqrt{169}$', '$= 13$'],
+      keyIdea: '$\\|\\mathbf{v}\\| = \\sqrt{v_1^2 + v_2^2 + v_3^2}$',
+    },
+    {
+      subskill: 'vec-dot',
+      level: 2,
+      prompt: 'For which value of $k$ is $(2, k, 1)$ perpendicular to $(3, -2, 4)$?',
+      options: [
+        { text: '$k = -5$', why: 'Sign error when solving $10 - 2k = 0$.' },
+        { text: '$k = 3$', why: 'The $z$-components ($1 \\times 4$) were left out of the dot product.' },
+        { text: '$k = 5$', why: 'Dot product $= 6 - 2k + 4 = 0$, so $k = 5$.' },
+        { text: '$k = 0$', why: 'A zero component does not make vectors perpendicular — the whole dot product must be zero.' },
+      ],
+      correctIndex: 2,
+      hint: 'Perpendicular means the dot product is zero. Write it out including every component.',
+      steps: ['$(2)(3) + (k)(-2) + (1)(4) = 0$', '$6 - 2k + 4 = 0$', '$10 = 2k \\Rightarrow k = 5$'],
+      keyIdea: '$\\mathbf{a} \\perp \\mathbf{b} \\iff \\mathbf{a}\\cdot\\mathbf{b} = 0$',
+    },
+    {
+      subskill: 'vec-magnitude',
+      level: 2,
+      prompt: 'Find the unit vector in the direction of $(6, -8)$.',
+      options: [
+        { text: '$(0.6, 0.8)$', why: 'Direction matters — the negative sign on the second component was lost.' },
+        { text: '$(3, -4)$', why: 'Halving keeps the direction but its length is 5, not 1.' },
+        { text: '$\\left(\\tfrac{6}{14}, -\\tfrac{8}{14}\\right)$', why: 'Divided by the sum of components instead of the magnitude.' },
+        { text: '$(0.6, -0.8)$', why: 'Magnitude is 10, so divide each component by 10.' },
+      ],
+      correctIndex: 3,
+      hint: 'A unit vector is the vector divided by its own magnitude.',
+      steps: ['$\\|(6,-8)\\| = \\sqrt{36 + 64} = 10$', '$\\hat{\\mathbf{v}} = \\tfrac{1}{10}(6, -8) = (0.6, -0.8)$'],
+      keyIdea: '$\\hat{\\mathbf{v}} = \\dfrac{\\mathbf{v}}{\\|\\mathbf{v}\\|}$',
+    },
+    {
+      subskill: 'vec-dot',
+      level: 3,
+      prompt: 'Find the angle between $\\mathbf{a} = (1, 0, 1)$ and $\\mathbf{b} = (0, 1, 1)$.',
+      options: [
+        { text: '$60^\\circ$', why: '$\\cos\\theta = \\tfrac{1}{\\sqrt2\\sqrt2} = \\tfrac12$, so $\\theta = 60^\\circ$.' },
+        { text: '$45^\\circ$', why: 'Used $\\cos\\theta = \\tfrac{1}{\\sqrt2}$ — divided by only one magnitude.' },
+        { text: '$90^\\circ$', why: 'They share a non-zero $z$-component, so the dot product is $1$, not $0$.' },
+        { text: '$30^\\circ$', why: 'Confused $\\cos^{-1}(\\tfrac12)$ with $\\sin^{-1}(\\tfrac12)$.' },
+      ],
+      correctIndex: 0,
+      hint: 'Rearrange $\\mathbf{a}\\cdot\\mathbf{b} = \\|\\mathbf{a}\\|\\|\\mathbf{b}\\|\\cos\\theta$ for $\\cos\\theta$.',
+      steps: [
+        '$\\mathbf{a}\\cdot\\mathbf{b} = 0 + 0 + 1 = 1$',
+        '$\\|\\mathbf{a}\\| = \\|\\mathbf{b}\\| = \\sqrt{2}$',
+        '$\\cos\\theta = \\dfrac{1}{\\sqrt2\\cdot\\sqrt2} = \\dfrac12 \\Rightarrow \\theta = 60^\\circ$',
+      ],
+      keyIdea: '$\\cos\\theta = \\dfrac{\\mathbf{a}\\cdot\\mathbf{b}}{\\|\\mathbf{a}\\|\\|\\mathbf{b}\\|}$',
+    },
+    {
+      subskill: 'vec-cross',
+      level: 3,
+      prompt: 'Compute $\\mathbf{a} \\times \\mathbf{b}$ for $\\mathbf{a} = (1, 2, 0)$ and $\\mathbf{b} = (0, 1, 3)$.',
+      options: [
+        { text: '$(6, 3, 1)$', why: 'The middle component of the cross product carries a minus sign.' },
+        { text: '$(0, 2, 0)$', why: 'That is component-wise multiplication, not the cross product.' },
+        { text: '$(6, -3, 1)$', why: 'Expand the determinant: $(2\\cdot3 - 0\\cdot1,\\ -(1\\cdot3 - 0\\cdot0),\\ 1\\cdot1 - 2\\cdot0)$.' },
+        { text: '$(-6, 3, -1)$', why: 'That is $\\mathbf{b} \\times \\mathbf{a}$ — the cross product is anti-commutative.' },
+      ],
+      correctIndex: 2,
+      hint: 'Use the determinant with $\\mathbf{i}, \\mathbf{j}, \\mathbf{k}$ on the top row. Remember the minus on $\\mathbf{j}$.',
+      steps: [
+        '$\\mathbf{i}: 2\\cdot3 - 0\\cdot1 = 6$',
+        '$\\mathbf{j}: -(1\\cdot3 - 0\\cdot0) = -3$',
+        '$\\mathbf{k}: 1\\cdot1 - 2\\cdot0 = 1$',
+        '$\\mathbf{a}\\times\\mathbf{b} = (6, -3, 1)$',
+      ],
+      keyIdea: '$\\mathbf{a}\\times\\mathbf{b} = -(\\mathbf{b}\\times\\mathbf{a})$',
+    },
+    {
+      subskill: 'vec-dot',
+      level: 1,
+      prompt: 'Compute the dot product $(1, 2, 3) \\cdot (4, -1, 2)$.',
+      options: [
+        { text: '$8$', why: '$1\\cdot4 + 2\\cdot(-1) + 3\\cdot2 = 4 - 2 + 6 = 8$.' },
+        { text: '$(4, -2, 6)$', why: 'That is component-wise multiplication. The dot product adds those products into a single number.' },
+        { text: '$12$', why: 'Sign slip: $2 \\cdot (-1) = -2$, not $+2$.' },
+        { text: '$\\sqrt{14}\\,\\sqrt{21}$', why: 'That is $\\|\\mathbf{a}\\|\\|\\mathbf{b}\\|$. The dot product also includes $\\cos\\theta$, so compute it component by component instead.' },
+      ],
+      correctIndex: 0,
+      hint: 'Multiply matching components, then add the results.',
+      steps: ['$(1)(4) + (2)(-1) + (3)(2)$', '$= 4 - 2 + 6 = 8$'],
+      keyIdea: '$\\mathbf{a}\\cdot\\mathbf{b} = a_1b_1 + a_2b_2 + a_3b_3$ is a scalar.',
+    },
+    {
+      subskill: 'vec-arithmetic',
+      level: 1,
+      prompt: 'Points $A = (1, 3)$ and $B = (4, -1)$. Find the vector $\\overrightarrow{AB}$.',
+      options: [
+        { text: '$(-3, 4)$', why: 'That is $\\overrightarrow{BA} = A - B$. To go from $A$ to $B$, compute $B - A$.' },
+        { text: '$(5, 2)$', why: 'Adding the points gives $A + B$, which is not a displacement.' },
+        { text: '$(3, -4)$', why: '$\\overrightarrow{AB} = B - A = (4 - 1,\\ -1 - 3)$.' },
+        { text: '$(3, 4)$', why: 'Sign slip in the second component: $-1 - 3 = -4$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Use end minus start.',
+      steps: ['$\\overrightarrow{AB} = B - A$', '$= (4 - 1,\\ -1 - 3) = (3, -4)$'],
+      keyIdea: '$\\overrightarrow{AB} = \\mathbf{b} - \\mathbf{a}$ (end minus start)',
+    },
+    {
+      subskill: 'vec-cross',
+      level: 2,
+      prompt: 'Find the area of the parallelogram spanned by $\\mathbf{a} = (2, 0, 0)$ and $\\mathbf{b} = (1, 3, 0)$.',
+      options: [
+        { text: '$3$', why: 'That is the area of the triangle, which is half the parallelogram.' },
+        { text: '$2$', why: 'That is $\\mathbf{a}\\cdot\\mathbf{b}$. The dot product measures alignment, not area.' },
+        { text: '$2\\sqrt{10}$', why: 'That is $\\|\\mathbf{a}\\|\\|\\mathbf{b}\\|$, which leaves out the $\\sin\\theta$ factor.' },
+        { text: '$6$', why: '$\\mathbf{a}\\times\\mathbf{b} = (0, 0, 6)$, and its magnitude is $6$.' },
+      ],
+      correctIndex: 3,
+      hint: 'The parallelogram area is the magnitude of the cross product.',
+      steps: [
+        '$\\mathbf{a}\\times\\mathbf{b} = (0\\cdot0 - 0\\cdot3,\\ -(2\\cdot0 - 0\\cdot1),\\ 2\\cdot3 - 0\\cdot1) = (0, 0, 6)$',
+        'Area $= \\|(0, 0, 6)\\| = 6$',
+      ],
+      keyIdea: 'Parallelogram area $= \\|\\mathbf{a}\\times\\mathbf{b}\\| = \\|\\mathbf{a}\\|\\|\\mathbf{b}\\|\\sin\\theta$',
+    },
+    {
+      subskill: 'vec-arithmetic',
+      level: 2,
+      prompt: 'Find the position vector of the midpoint of $P = (2, -1, 4)$ and $Q = (6, 3, 0)$.',
+      options: [
+        { text: '$(8, 2, 4)$', why: 'That is $\\mathbf{p} + \\mathbf{q}$. It still needs halving.' },
+        { text: '$(4, 1, 2)$', why: '$\\tfrac12(\\mathbf{p} + \\mathbf{q}) = \\tfrac12(8, 2, 4)$.' },
+        { text: '$(4, 4, -4)$', why: 'That is $\\overrightarrow{PQ}$, the displacement from $P$ to $Q$. It is not a point.' },
+        { text: '$(2, 2, -2)$', why: 'That is half of $\\overrightarrow{PQ}$. Add it to $\\mathbf{p}$ to reach the midpoint.' },
+      ],
+      correctIndex: 1,
+      hint: 'The midpoint is the average of the two position vectors.',
+      steps: ['$\\mathbf{p} + \\mathbf{q} = (8, 2, 4)$', '$\\mathbf{m} = \\tfrac12(8, 2, 4) = (4, 1, 2)$'],
+      keyIdea: 'Midpoint $= \\tfrac12(\\mathbf{p} + \\mathbf{q})$',
+    },
+    {
+      subskill: 'vec-dot',
+      level: 3,
+      prompt: 'Find the vector projection of $\\mathbf{a} = (2, 3)$ onto $\\mathbf{b} = (1, 1)$.',
+      options: [
+        { text: '$\\tfrac{5}{\\sqrt2}$', why: 'That is the scalar projection (a length). The question asks for a vector.' },
+        { text: '$(5, 5)$', why: 'That is $(\\mathbf{a}\\cdot\\mathbf{b})\\,\\mathbf{b}$. You still need to divide by $\\|\\mathbf{b}\\|^2 = 2$.' },
+        { text: '$\\left(\\tfrac52, \\tfrac52\\right)$', why: '$\\dfrac{\\mathbf{a}\\cdot\\mathbf{b}}{\\|\\mathbf{b}\\|^2}\\mathbf{b} = \\dfrac52(1, 1)$.' },
+        { text: '$\\tfrac{5}{\\sqrt2}(1, 1)$', why: 'This divides by $\\|\\mathbf{b}\\|$ only once. Since $\\mathbf{b}$ is not a unit vector, divide by $\\|\\mathbf{b}\\|^2$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Use $\\text{proj}_{\\mathbf{b}}\\mathbf{a} = \\dfrac{\\mathbf{a}\\cdot\\mathbf{b}}{\\|\\mathbf{b}\\|^2}\\,\\mathbf{b}$.',
+      steps: [
+        '$\\mathbf{a}\\cdot\\mathbf{b} = 2 + 3 = 5$',
+        '$\\|\\mathbf{b}\\|^2 = 1 + 1 = 2$',
+        '$\\text{proj}_{\\mathbf{b}}\\mathbf{a} = \\tfrac52(1, 1) = \\left(\\tfrac52, \\tfrac52\\right)$',
+      ],
+      keyIdea: '$\\text{proj}_{\\mathbf{b}}\\mathbf{a} = \\dfrac{\\mathbf{a}\\cdot\\mathbf{b}}{\\|\\mathbf{b}\\|^2}\\,\\mathbf{b}$',
+    },
+    {
+      subskill: 'vec-cross',
+      level: 3,
+      prompt: 'Find a vector perpendicular to both $(1, 1, 0)$ and $(0, 1, 1)$.',
+      options: [
+        { text: '$(1, 1, 1)$', why: 'The minus sign on the $\\mathbf{j}$ component was dropped. Check: $(1,1,1)\\cdot(1,1,0) = 2 \\neq 0$.' },
+        { text: '$(0, 1, 0)$', why: 'That is component-wise multiplication, not the cross product.' },
+        { text: '$(1, 2, 1)$', why: 'The sum of two vectors lies in their plane, so it cannot be perpendicular to both.' },
+        { text: '$(1, -1, 1)$', why: 'Cross product: $(1\\cdot1 - 0\\cdot1,\\ -(1\\cdot1 - 0\\cdot0),\\ 1\\cdot1 - 1\\cdot0)$.' },
+      ],
+      correctIndex: 3,
+      hint: 'The cross product of two vectors is perpendicular to both of them.',
+      steps: [
+        '$\\mathbf{i}: 1\\cdot1 - 0\\cdot1 = 1$',
+        '$\\mathbf{j}: -(1\\cdot1 - 0\\cdot0) = -1$',
+        '$\\mathbf{k}: 1\\cdot1 - 1\\cdot0 = 1$',
+        'Check: $(1,-1,1)\\cdot(1,1,0) = 0$ and $(1,-1,1)\\cdot(0,1,1) = 0$ ✓',
+      ],
+      keyIdea: 'To find a normal to two vectors, take their cross product.',
+    },
+  ],
+  matrices: [
+    {
+      subskill: 'mat-multiply',
+      level: 1,
+      prompt:
+        'Let $A = \\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}$ and $B = \\begin{bmatrix}0&1\\\\1&0\\end{bmatrix}$. Find $AB$.',
+      options: [
+        { text: '$\\begin{bmatrix}3&4\\\\1&2\\end{bmatrix}$', why: 'That is $BA$ (rows swapped). Matrix multiplication is not commutative.' },
+        { text: '$\\begin{bmatrix}2&1\\\\4&3\\end{bmatrix}$', why: 'Row of $A$ times column of $B$: multiplying by $B$ on the right swaps the columns.' },
+        { text: '$\\begin{bmatrix}0&2\\\\3&0\\end{bmatrix}$', why: 'Entry-by-entry multiplication is not matrix multiplication.' },
+        { text: '$\\begin{bmatrix}1&3\\\\2&4\\end{bmatrix}$', why: 'That is the transpose of $A$, not $AB$.' },
+      ],
+      correctIndex: 1,
+      hint: 'Entry $(i,j)$ of $AB$ is row $i$ of $A$ dotted with column $j$ of $B$.',
+      steps: [
+        '$(AB)_{11} = 1\\cdot0 + 2\\cdot1 = 2$, $(AB)_{12} = 1\\cdot1 + 2\\cdot0 = 1$',
+        '$(AB)_{21} = 3\\cdot0 + 4\\cdot1 = 4$, $(AB)_{22} = 3\\cdot1 + 4\\cdot0 = 3$',
+      ],
+      keyIdea: 'Row-by-column: $(AB)_{ij} = \\sum_k A_{ik}B_{kj}$',
+    },
+    {
+      subskill: 'mat-determinant',
+      level: 1,
+      prompt: 'Find $\\det\\begin{bmatrix}3&5\\\\2&4\\end{bmatrix}$.',
+      options: [
+        { text: '$22$', why: 'Used $ad + bc$ — the determinant subtracts the off-diagonal product.' },
+        { text: '$-2$', why: 'Computed $bc - ad$ — the order is main diagonal minus off-diagonal.' },
+        { text: '$2$', why: '$ad - bc = 12 - 10 = 2$.' },
+        { text: '$14$', why: 'Summing the entries is not the determinant.' },
+      ],
+      correctIndex: 2,
+      hint: 'For $\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix}$, the determinant is $ad - bc$.',
+      steps: ['$ad = 3 \\cdot 4 = 12$', '$bc = 5 \\cdot 2 = 10$', '$\\det = 12 - 10 = 2$'],
+      keyIdea: '$\\det\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix} = ad - bc$',
+    },
+    {
+      subskill: 'mat-inverse',
+      level: 2,
+      prompt: 'Find the inverse of $\\begin{bmatrix}2&1\\\\5&3\\end{bmatrix}$.',
+      options: [
+        { text: '$\\begin{bmatrix}3&-1\\\\-5&2\\end{bmatrix}$', why: '$\\det = 1$; swap the diagonal, negate the off-diagonal, divide by 1.' },
+        { text: '$\\begin{bmatrix}3&1\\\\5&2\\end{bmatrix}$', why: 'The diagonal was swapped, but the off-diagonal entries must also be negated.' },
+        { text: '$\\begin{bmatrix}\\tfrac12&1\\\\\\tfrac15&\\tfrac13\\end{bmatrix}$', why: 'The inverse matrix is not the reciprocal of each entry.' },
+        { text: '$\\begin{bmatrix}-3&1\\\\5&-2\\end{bmatrix}$', why: 'The wrong entries were negated — this is $-A^{-1}$.' },
+      ],
+      correctIndex: 0,
+      hint: '$A^{-1} = \\dfrac{1}{ad-bc}\\begin{bmatrix}d&-b\\\\-c&a\\end{bmatrix}$',
+      steps: [
+        '$\\det A = 2\\cdot3 - 1\\cdot5 = 1$',
+        'Swap $a$ and $d$, negate $b$ and $c$: $\\begin{bmatrix}3&-1\\\\-5&2\\end{bmatrix}$',
+        'Divide by $\\det A = 1$. Check: $AA^{-1} = I$ ✓',
+      ],
+      keyIdea: 'Always check your inverse by multiplying back to $I$.',
+    },
+    {
+      subskill: 'mat-multiply',
+      level: 2,
+      prompt: '$A$ is a $2\\times3$ matrix and $B$ is a $3\\times4$ matrix. What is the size of $AB$?',
+      options: [
+        { text: '$3\\times3$', why: 'The inner dimensions (3 and 3) must match, but they disappear from the result.' },
+        { text: '$4\\times2$', why: 'Rows come from the first matrix, columns from the second — not the reverse.' },
+        { text: 'Undefined', why: 'It is defined: the columns of $A$ (3) match the rows of $B$ (3).' },
+        { text: '$2\\times4$', why: '$(2\\times\\underline{3})(\\underline{3}\\times4)$: inner sizes match, outer sizes give the result.' },
+      ],
+      correctIndex: 3,
+      hint: 'Write the sizes side by side: $(2\\times3)(3\\times4)$. What cancels?',
+      steps: ['Inner dimensions: $3 = 3$, so $AB$ is defined', 'Outer dimensions give the size: $2\\times4$'],
+      keyIdea: '$(m\\times n)(n\\times p) = (m\\times p)$',
+    },
+    {
+      subskill: 'mat-transform',
+      level: 3,
+      prompt: 'Which matrix rotates every point in the plane $90^\\circ$ anticlockwise about the origin?',
+      options: [
+        { text: '$\\begin{bmatrix}0&1\\\\-1&0\\end{bmatrix}$', why: 'This sends $(1,0)$ to $(0,-1)$ — a clockwise rotation.' },
+        { text: '$\\begin{bmatrix}0&-1\\\\1&0\\end{bmatrix}$', why: 'Columns are the images of the basis vectors: $(1,0)\\to(0,1)$ and $(0,1)\\to(-1,0)$.' },
+        { text: '$\\begin{bmatrix}-1&0\\\\0&-1\\end{bmatrix}$', why: 'This is a $180^\\circ$ rotation.' },
+        { text: '$\\begin{bmatrix}1&0\\\\0&-1\\end{bmatrix}$', why: 'This is a reflection in the $x$-axis.' },
+      ],
+      correctIndex: 1,
+      hint: 'The columns of a transformation matrix are where $(1,0)$ and $(0,1)$ end up.',
+      steps: [
+        'Rotating $(1,0)$ by $90^\\circ$ anticlockwise gives $(0,1)$ — first column',
+        'Rotating $(0,1)$ gives $(-1,0)$ — second column',
+        'Matrix: $\\begin{bmatrix}0&-1\\\\1&0\\end{bmatrix}$',
+      ],
+      keyIdea: 'A matrix is defined by what it does to the basis vectors.',
+    },
+    {
+      subskill: 'mat-determinant',
+      level: 3,
+      prompt: 'For which values of $k$ is $\\begin{bmatrix}k&2\\\\8&k\\end{bmatrix}$ singular (non-invertible)?',
+      options: [
+        { text: '$k = 4$ only', why: '$k^2 = 16$ has two solutions — the negative root was missed.' },
+        { text: '$k = 16$', why: 'That solves $k = 16$, not $k^2 = 16$ — take the square root.' },
+        { text: '$k = 0$', why: 'At $k = 0$, $\\det = -16 \\neq 0$, so the matrix is still invertible.' },
+        { text: '$k = \\pm 4$', why: '$\\det = k^2 - 16 = 0 \\Rightarrow k = \\pm4$.' },
+      ],
+      correctIndex: 3,
+      hint: 'Singular means the determinant is zero. Set it to zero and solve.',
+      steps: ['$\\det = k\\cdot k - 2\\cdot 8 = k^2 - 16$', '$k^2 - 16 = 0 \\Rightarrow k^2 = 16$', '$k = \\pm 4$'],
+      keyIdea: '$A$ is singular $\\iff \\det A = 0$',
+    },
+    {
+      subskill: 'mat-multiply',
+      level: 1,
+      prompt: 'Compute $\\begin{bmatrix}2&1\\\\0&3\\end{bmatrix}\\begin{bmatrix}1\\\\4\\end{bmatrix}$.',
+      options: [
+        { text: '$\\begin{bmatrix}6\\\\12\\end{bmatrix}$', why: 'Row 1: $2\\cdot1 + 1\\cdot4 = 6$. Row 2: $0\\cdot1 + 3\\cdot4 = 12$.' },
+        { text: '$\\begin{bmatrix}2\\\\12\\end{bmatrix}$', why: 'Only the diagonal entries were used. Each row must be dotted with the whole vector.' },
+        { text: '$\\begin{bmatrix}2\\\\13\\end{bmatrix}$', why: 'Columns were used instead of rows, which computes $A^T\\mathbf{x}$.' },
+        { text: '$\\begin{bmatrix}9\\\\3\\end{bmatrix}$', why: 'The vector entries were paired in reverse order.' },
+      ],
+      correctIndex: 0,
+      hint: 'Each entry of the result is a row of the matrix dotted with the vector.',
+      steps: ['Row 1: $2\\cdot1 + 1\\cdot4 = 6$', 'Row 2: $0\\cdot1 + 3\\cdot4 = 12$'],
+      keyIdea: '$(A\\mathbf{x})_i$ = row $i$ of $A$ · $\\mathbf{x}$',
+    },
+    {
+      subskill: 'mat-determinant',
+      level: 1,
+      prompt: 'Find $\\det\\begin{bmatrix}2&-3\\\\1&4\\end{bmatrix}$.',
+      options: [
+        { text: '$5$', why: 'The minus sign on $-3$ was lost: $ad - bc = 8 - (-3) = 11$.' },
+        { text: '$-11$', why: 'Computed $bc - ad$. The order is main diagonal minus off-diagonal.' },
+        { text: '$4$', why: 'Summing the entries is not the determinant.' },
+        { text: '$11$', why: '$ad - bc = 2\\cdot4 - (-3)\\cdot1 = 8 + 3 = 11$.' },
+      ],
+      correctIndex: 3,
+      hint: 'Use $ad - bc$ and watch the negative entry.',
+      steps: ['$ad = 2\\cdot4 = 8$', '$bc = (-3)\\cdot1 = -3$', '$\\det = 8 - (-3) = 11$'],
+      keyIdea: '$\\det\\begin{bmatrix}a&b\\\\c&d\\end{bmatrix} = ad - bc$',
+    },
+    {
+      subskill: 'mat-inverse',
+      level: 2,
+      prompt: 'Find the inverse of $\\begin{bmatrix}4&2\\\\3&2\\end{bmatrix}$.',
+      options: [
+        { text: '$\\begin{bmatrix}2&-2\\\\-3&4\\end{bmatrix}$', why: 'This is the adjugate. It still has to be divided by $\\det A = 2$.' },
+        { text: '$\\begin{bmatrix}1&-1\\\\-\\tfrac32&2\\end{bmatrix}$', why: '$\\tfrac{1}{2}\\begin{bmatrix}2&-2\\\\-3&4\\end{bmatrix}$. Check: $AA^{-1} = I$.' },
+        { text: '$\\begin{bmatrix}1&1\\\\\\tfrac32&2\\end{bmatrix}$', why: 'The off-diagonal entries must be negated.' },
+        { text: '$\\begin{bmatrix}2&-1\\\\-\\tfrac32&1\\end{bmatrix}$', why: 'The diagonal entries $a$ and $d$ were not swapped.' },
+      ],
+      correctIndex: 1,
+      hint: '$A^{-1} = \\dfrac{1}{ad-bc}\\begin{bmatrix}d&-b\\\\-c&a\\end{bmatrix}$',
+      steps: [
+        '$\\det A = 4\\cdot2 - 2\\cdot3 = 2$',
+        'Swap $a, d$ and negate $b, c$: $\\begin{bmatrix}2&-2\\\\-3&4\\end{bmatrix}$',
+        'Divide by $2$: $\\begin{bmatrix}1&-1\\\\-\\tfrac32&2\\end{bmatrix}$',
+      ],
+      keyIdea: 'Do not forget the $\\dfrac{1}{\\det A}$ factor.',
+    },
+    {
+      subskill: 'mat-multiply',
+      level: 2,
+      prompt: 'Which statement is true for all square matrices $A$ and $B$ of the same size?',
+      options: [
+        { text: '$(AB)^T = A^TB^T$', why: 'Transposing a product reverses the order of the factors.' },
+        { text: '$AB = BA$', why: 'Matrix multiplication is not commutative in general.' },
+        { text: '$(AB)^T = B^TA^T$', why: 'Transposing a product reverses the order of the factors.' },
+        { text: '$(A + B)^2 = A^2 + 2AB + B^2$', why: 'Expanding gives $A^2 + AB + BA + B^2$. This only simplifies if $AB = BA$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Remember that order matters. Which rules secretly assume $AB = BA$?',
+      steps: [
+        '$(AB)^T_{ij} = (AB)_{ji} = \\sum_k A_{jk}B_{ki} = \\sum_k (B^T)_{ik}(A^T)_{kj}$',
+        'So $(AB)^T = B^TA^T$',
+      ],
+      keyIdea: '"Socks and shoes": $(AB)^T = B^TA^T$ and $(AB)^{-1} = B^{-1}A^{-1}$',
+    },
+    {
+      subskill: 'mat-transform',
+      level: 3,
+      prompt: 'A shape with area $5$ is transformed by $\\begin{bmatrix}3&1\\\\2&4\\end{bmatrix}$. What is the area of the image?',
+      options: [
+        { text: '$10$', why: 'That is the area scale factor, $\\det = 10$. Multiply it by the original area.' },
+        { text: '$70$', why: 'Used $ad + bc = 14$ as the scale factor. The determinant is $ad - bc$.' },
+        { text: '$\\tfrac12$', why: 'Divided by the scale factor instead of multiplying.' },
+        { text: '$50$', why: '$|\\det| = |12 - 2| = 10$, so the new area is $10 \\times 5 = 50$.' },
+      ],
+      correctIndex: 3,
+      hint: 'The determinant tells you how a linear transformation scales area.',
+      steps: ['$\\det = 3\\cdot4 - 1\\cdot2 = 10$', 'New area $= |\\det| \\times 5 = 50$'],
+      keyIdea: 'Area scale factor $= |\\det A|$',
+    },
+    {
+      subskill: 'mat-inverse',
+      level: 3,
+      prompt: 'Use a matrix inverse to solve $2x + y = 5$ and $x + y = 3$.',
+      options: [
+        { text: '$x = 2,\\ y = 1$', why: '$A^{-1} = \\begin{bmatrix}1&-1\\\\-1&2\\end{bmatrix}$, so $A^{-1}\\begin{bmatrix}5\\\\3\\end{bmatrix} = \\begin{bmatrix}2\\\\1\\end{bmatrix}$.' },
+        { text: '$x = 13,\\ y = 8$', why: 'That multiplies by $A$ instead of $A^{-1}$.' },
+        { text: '$x = 8,\\ y = 11$', why: 'The off-diagonal entries of the inverse were not negated.' },
+        { text: '$x = 1,\\ y = 2$', why: 'The solution was read in the wrong order. Check it: $2(1) + 2 = 4 \\neq 5$.' },
+      ],
+      correctIndex: 0,
+      hint: 'Write it as $A\\mathbf{x} = \\mathbf{b}$, then $\\mathbf{x} = A^{-1}\\mathbf{b}$.',
+      steps: [
+        '$A = \\begin{bmatrix}2&1\\\\1&1\\end{bmatrix}$, $\\det A = 1$',
+        '$A^{-1} = \\begin{bmatrix}1&-1\\\\-1&2\\end{bmatrix}$',
+        '$A^{-1}\\begin{bmatrix}5\\\\3\\end{bmatrix} = \\begin{bmatrix}5 - 3\\\\-5 + 6\\end{bmatrix} = \\begin{bmatrix}2\\\\1\\end{bmatrix}$',
+      ],
+      keyIdea: '$A\\mathbf{x} = \\mathbf{b} \\Rightarrow \\mathbf{x} = A^{-1}\\mathbf{b}$',
+    },
+  ],
+  limits: [
+    {
+      subskill: 'lim-direct',
+      level: 1,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 2} (x^2 + 3x)$.',
+      options: [
+        { text: '$10$', why: 'Polynomials are continuous, so substitute: $4 + 6 = 10$.' },
+        { text: '$6$', why: 'Only the $3x$ term was evaluated.' },
+        { text: 'Does not exist', why: 'Nothing goes wrong at $x=2$ — direct substitution works for polynomials.' },
+        { text: '$4$', why: 'Only the $x^2$ term was evaluated.' },
+      ],
+      correctIndex: 0,
+      hint: 'For a polynomial, try plugging the value straight in.',
+      steps: ['The function is continuous at $x=2$', 'Substitute: $2^2 + 3(2) = 4 + 6 = 10$'],
+      keyIdea: 'If $f$ is continuous at $a$, then $\\lim_{x\\to a} f(x) = f(a)$.',
+    },
+    {
+      subskill: 'lim-factor',
+      level: 1,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 3} \\frac{x^2 - 9}{x - 3}$.',
+      options: [
+        { text: '$0$', why: '$\\tfrac00$ is not $0$ — it is an indeterminate form that signals "simplify first".' },
+        { text: 'Does not exist', why: 'The function is undefined at $x=3$, but the limit can still exist.' },
+        { text: '$6$', why: 'Factor: $\\tfrac{(x-3)(x+3)}{x-3} = x+3 \\to 6$.' },
+        { text: '$3$', why: 'After cancelling you get $x + 3$, not $x$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Substitution gives $\\tfrac00$. Can you factor the numerator?',
+      steps: [
+        'Direct substitution gives $\\tfrac00$ (indeterminate)',
+        '$x^2 - 9 = (x-3)(x+3)$',
+        'Cancel $(x-3)$: limit of $x+3$ as $x\\to3$ is $6$',
+      ],
+      keyIdea: '$\\tfrac00$ means "do more algebra", not "undefined".',
+    },
+    {
+      subskill: 'lim-infinity',
+      level: 2,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to \\infty} \\frac{3x^2 + 1}{2x^2 - x}$.',
+      options: [
+        { text: '$\\infty$', why: 'The top grows, but so does the bottom — at the same rate.' },
+        { text: '$\\tfrac32$', why: 'Equal highest powers: the limit is the ratio of leading coefficients.' },
+        { text: '$0$', why: 'That happens only when the bottom has a higher power than the top.' },
+        { text: '$3$', why: 'The leading coefficient of the denominator (2) also matters.' },
+      ],
+      correctIndex: 1,
+      hint: 'Divide every term by the highest power of $x$ in the denominator.',
+      steps: [
+        'Divide top and bottom by $x^2$: $\\dfrac{3 + 1/x^2}{2 - 1/x}$',
+        'As $x\\to\\infty$, $1/x^2 \\to 0$ and $1/x \\to 0$',
+        'Limit $= \\tfrac32$',
+      ],
+      keyIdea: 'At infinity, the highest powers dominate.',
+    },
+    {
+      subskill: 'lim-special',
+      level: 2,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 0} \\frac{\\sin 5x}{x}$.',
+      options: [
+        { text: '$1$', why: 'The special limit needs the same expression inside the sine and underneath: $\\tfrac{\\sin 5x}{5x}$.' },
+        { text: '$0$', why: 'Both top and bottom go to 0 — that is indeterminate, not zero.' },
+        { text: '$\\tfrac15$', why: 'The factor of 5 ends up multiplying, not dividing.' },
+        { text: '$5$', why: '$\\tfrac{\\sin5x}{x} = 5\\cdot\\tfrac{\\sin5x}{5x} \\to 5\\cdot1 = 5$.' },
+      ],
+      correctIndex: 3,
+      hint: 'Make the denominator match the inside of the sine: multiply and divide by 5.',
+      steps: [
+        '$\\dfrac{\\sin 5x}{x} = 5\\cdot\\dfrac{\\sin 5x}{5x}$',
+        'Let $u = 5x$; as $x\\to0$, $u\\to0$ and $\\dfrac{\\sin u}{u}\\to1$',
+        'Limit $= 5$',
+      ],
+      keyIdea: '$\\displaystyle\\lim_{u\\to0}\\frac{\\sin u}{u} = 1$',
+    },
+    {
+      subskill: 'lim-special',
+      level: 3,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 0} \\frac{|x|}{x}$.',
+      options: [
+        { text: '$1$', why: 'True only from the right. From the left, $\\tfrac{|x|}{x} = -1$.' },
+        { text: '$0$', why: 'The function is never 0 — it is always $\\pm1$.' },
+        { text: 'Does not exist', why: 'Left limit is $-1$, right limit is $1$. They disagree, so no limit.' },
+        { text: '$-1$', why: 'True only from the left. From the right, $\\tfrac{|x|}{x} = 1$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Consider $x > 0$ and $x < 0$ separately.',
+      steps: [
+        'For $x > 0$: $\\tfrac{|x|}{x} = \\tfrac{x}{x} = 1$, so the right limit is $1$',
+        'For $x < 0$: $\\tfrac{|x|}{x} = \\tfrac{-x}{x} = -1$, so the left limit is $-1$',
+        '$1 \\neq -1$, so the two-sided limit does not exist',
+      ],
+      keyIdea: 'A limit exists only if both one-sided limits exist and agree.',
+    },
+    {
+      subskill: 'lim-factor',
+      level: 3,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 0} \\frac{\\sqrt{x + 4} - 2}{x}$.',
+      options: [
+        { text: '$\\tfrac14$', why: 'Multiply by the conjugate: the expression becomes $\\tfrac{1}{\\sqrt{x+4}+2} \\to \\tfrac14$.' },
+        { text: '$0$', why: '$\\tfrac00$ is indeterminate — it needs simplifying, not reading as 0.' },
+        { text: '$\\tfrac12$', why: 'The conjugate gives $\\sqrt{x+4} + 2$ in the denominator, which tends to $4$, not $2$.' },
+        { text: 'Does not exist', why: 'The singularity is removable — rationalising reveals a finite limit.' },
+      ],
+      correctIndex: 0,
+      hint: 'Multiply top and bottom by the conjugate $\\sqrt{x+4} + 2$.',
+      steps: [
+        '$\\dfrac{\\sqrt{x+4}-2}{x}\\cdot\\dfrac{\\sqrt{x+4}+2}{\\sqrt{x+4}+2} = \\dfrac{x}{x(\\sqrt{x+4}+2)}$',
+        'Cancel $x$: $\\dfrac{1}{\\sqrt{x+4}+2}$',
+        'Substitute $x = 0$: $\\dfrac{1}{2+2} = \\dfrac14$',
+      ],
+      keyIdea: 'Conjugates remove square roots from the problem term.',
+    },
+    {
+      subskill: 'lim-direct',
+      level: 1,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to -1} (2x^3 - x + 4)$.',
+      options: [
+        { text: '$7$', why: '$(-1)^3 = -1$, not $1$, so $2x^3 \\to -2$.' },
+        { text: '$1$', why: 'At $x = -1$, the term $-x$ equals $+1$, not $-1$.' },
+        { text: '$3$', why: 'Substitute: $2(-1) - (-1) + 4 = -2 + 1 + 4 = 3$.' },
+        { text: '$4$', why: 'The other terms only vanish as $x \\to 0$, not as $x \\to -1$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Polynomials are continuous, so substitute carefully with the negative value.',
+      steps: ['$2(-1)^3 = -2$', '$-(-1) = +1$', '$-2 + 1 + 4 = 3$'],
+      keyIdea: 'Use brackets when substituting negative numbers.',
+    },
+    {
+      subskill: 'lim-infinity',
+      level: 1,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to \\infty} \\frac{4x + 1}{x^2 + 3}$.',
+      options: [
+        { text: '$4$', why: 'The ratio of leading coefficients only applies when the highest powers are equal.' },
+        { text: '$\\infty$', why: 'The denominator grows faster ($x^2$ beats $x$).' },
+        { text: '$\\tfrac13$', why: 'That substitutes $x = 0$, but the limit is as $x \\to \\infty$.' },
+        { text: '$0$', why: 'The bottom has the higher power, so the fraction shrinks to $0$.' },
+      ],
+      correctIndex: 3,
+      hint: 'Compare the highest power on top with the highest power on the bottom.',
+      steps: ['Divide by $x^2$: $\\dfrac{4/x + 1/x^2}{1 + 3/x^2}$', 'Top $\\to 0$, bottom $\\to 1$', 'Limit $= 0$'],
+      keyIdea: 'If the denominator has the higher power, the limit at $\\infty$ is $0$.',
+    },
+    {
+      subskill: 'lim-factor',
+      level: 2,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 2} \\frac{x^2 - 5x + 6}{x^2 - 4}$.',
+      options: [
+        { text: '$0$', why: 'Substitution gives $\\tfrac00$, which is indeterminate, not $0$.' },
+        { text: '$-\\tfrac14$', why: '$\\dfrac{(x-2)(x-3)}{(x-2)(x+2)} = \\dfrac{x-3}{x+2} \\to \\dfrac{-1}{4}$.' },
+        { text: '$\\tfrac54$', why: 'The numerator factorises as $(x-2)(x-3)$, not $(x-2)(x+3)$.' },
+        { text: '$\\tfrac14$', why: 'Sign slip: $2 - 3 = -1$.' },
+      ],
+      correctIndex: 1,
+      hint: 'Both top and bottom are zero at $x = 2$, so $(x - 2)$ is a factor of each.',
+      steps: [
+        '$x^2 - 5x + 6 = (x-2)(x-3)$ and $x^2 - 4 = (x-2)(x+2)$',
+        'Cancel $(x - 2)$: $\\dfrac{x-3}{x+2}$',
+        'Substitute $x = 2$: $\\dfrac{-1}{4}$',
+      ],
+      keyIdea: 'If $\\tfrac00$ appears at $x = a$, look for a common factor $(x - a)$.',
+    },
+    {
+      subskill: 'lim-special',
+      level: 2,
+      prompt: 'Evaluate the one-sided limit $\\displaystyle\\lim_{x \\to 3^-} \\frac{1}{x - 3}$.',
+      options: [
+        { text: '$-\\infty$', why: 'Just left of 3, $x - 3$ is a tiny negative number, so $\\tfrac{1}{x-3}$ is large and negative.' },
+        { text: '$\\infty$', why: 'That is the limit from the right. From the left, $x - 3 < 0$.' },
+        { text: '$0$', why: 'The denominator is shrinking to $0$, so the fraction grows without bound.' },
+        { text: 'Does not exist', why: 'The two-sided limit fails, but this one-sided limit is $-\\infty$.' },
+      ],
+      correctIndex: 0,
+      hint: 'Try $x = 2.9$ and $x = 2.99$. What sign is $x - 3$?',
+      steps: ['For $x < 3$, $x - 3 < 0$', 'As $x \\to 3^-$, $x - 3 \\to 0^-$', 'So $\\dfrac{1}{x-3} \\to -\\infty$'],
+      keyIdea: 'For one-sided limits near a vertical asymptote, check the sign of the denominator.',
+    },
+    {
+      subskill: 'lim-infinity',
+      level: 3,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to \\infty} \\left(\\sqrt{x^2 + 6x} - x\\right)$.',
+      options: [
+        { text: '$0$', why: '$\\infty - \\infty$ is indeterminate. Rationalise to see what really happens.' },
+        { text: '$\\infty$', why: 'The two terms nearly cancel, so the difference stays finite.' },
+        { text: '$3$', why: 'Rationalise: $\\dfrac{6x}{\\sqrt{x^2+6x}+x} \\to \\dfrac{6}{2} = 3$.' },
+        { text: '$6$', why: 'The denominator behaves like $2x$, not $x$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Multiply by the conjugate $\\sqrt{x^2 + 6x} + x$ over itself.',
+      steps: [
+        '$\\left(\\sqrt{x^2+6x} - x\\right)\\cdot\\dfrac{\\sqrt{x^2+6x}+x}{\\sqrt{x^2+6x}+x} = \\dfrac{6x}{\\sqrt{x^2+6x}+x}$',
+        'Divide top and bottom by $x$: $\\dfrac{6}{\\sqrt{1 + 6/x} + 1}$',
+        'As $x \\to \\infty$: $\\dfrac{6}{1 + 1} = 3$',
+      ],
+      keyIdea: '$\\infty - \\infty$ is indeterminate. Rationalise to resolve it.',
+    },
+    {
+      subskill: 'lim-special',
+      level: 3,
+      prompt: 'Evaluate $\\displaystyle\\lim_{x \\to 0} \\frac{\\sin 3x}{\\sin 2x}$.',
+      options: [
+        { text: '$1$', why: 'Each sine behaves like its argument, and the arguments differ ($3x$ vs $2x$).' },
+        { text: '$\\tfrac23$', why: 'The ratio is upside down: the $3$ comes from the numerator.' },
+        { text: '$0$', why: '$\\tfrac00$ is indeterminate, not $0$.' },
+        { text: '$\\tfrac32$', why: '$\\dfrac{\\sin3x}{3x}\\cdot\\dfrac{2x}{\\sin2x}\\cdot\\dfrac{3x}{2x} \\to 1\\cdot1\\cdot\\tfrac32$.' },
+      ],
+      correctIndex: 3,
+      hint: 'Make two copies of $\\dfrac{\\sin u}{u}$ by multiplying and dividing by $3x$ and $2x$.',
+      steps: [
+        '$\\dfrac{\\sin 3x}{\\sin 2x} = \\dfrac{\\sin 3x}{3x}\\cdot\\dfrac{2x}{\\sin 2x}\\cdot\\dfrac{3x}{2x}$',
+        'The first two factors $\\to 1$',
+        'Limit $= \\dfrac{3}{2}$',
+      ],
+      keyIdea: 'Near $0$, $\\sin(kx) \\approx kx$.',
+    },
+  ],
+  differentiation: [
+    {
+      subskill: 'diff-power',
+      level: 1,
+      prompt: 'Differentiate $f(x) = 4x^3 - 2x + 7$.',
+      options: [
+        { text: '$12x^2 - 2x$', why: 'The derivative of $2x$ is $2$, since $x^1$ becomes $x^0 = 1$.' },
+        { text: '$12x^2 - 2 + 7$', why: 'Constants differentiate to $0$ — they do not change.' },
+        { text: '$12x^2 - 2$', why: 'Power rule on each term; the constant 7 vanishes.' },
+        { text: '$12x^3 - 2$', why: 'Bring the power down and reduce it by one: $x^3 \\to 3x^2$.' },
+      ],
+      correctIndex: 2,
+      hint: 'Use $\\frac{d}{dx}x^n = nx^{n-1}$ on each term. What happens to a constant?',
+      steps: ['$\\frac{d}{dx}4x^3 = 12x^2$', '$\\frac{d}{dx}(-2x) = -2$', '$\\frac{d}{dx}7 = 0$', "$f'(x) = 12x^2 - 2$"],
+      keyIdea: '$\\frac{d}{dx}x^n = nx^{n-1}$; constants differentiate to 0.',
+    },
+    {
+      subskill: 'diff-power',
+      level: 1,
+      prompt: 'Differentiate $y = \\dfrac{1}{x^2}$.',
+      options: [
+        { text: '$-2x^{-3}$', why: 'Rewrite as $x^{-2}$, then the power rule gives $-2x^{-3}$.' },
+        { text: '$2x^{-3}$', why: 'The power $-2$ comes down as a negative coefficient.' },
+        { text: '$-2x^{-1}$', why: 'Reduce the power by one: $-2 - 1 = -3$, not $-1$.' },
+        { text: '$\\dfrac{1}{2x}$', why: 'You cannot differentiate the denominator on its own.' },
+      ],
+      correctIndex: 0,
+      hint: 'Rewrite with a negative index first.',
+      steps: ['$y = x^{-2}$', "$y' = -2x^{-2-1} = -2x^{-3}$", '$= -\\dfrac{2}{x^3}$'],
+      keyIdea: 'Rewrite fractions as negative powers before differentiating.',
+    },
+    {
+      subskill: 'diff-chain',
+      level: 2,
+      prompt: 'Differentiate $y = (3x + 1)^5$.',
+      options: [
+        { text: '$5(3x+1)^4$', why: 'Chain rule: you must also multiply by the derivative of the inside, $3$.' },
+        { text: '$15(3x+1)^4$', why: 'Outer: $5(\\ldots)^4$; inner derivative: $3$. Product: $15(3x+1)^4$.' },
+        { text: '$15(3x+1)^5$', why: 'The power must drop by one.' },
+        { text: '$3(3x+1)^4$', why: 'The power 5 must also be brought down as a factor.' },
+      ],
+      correctIndex: 1,
+      hint: 'Differentiate the outside (power) then multiply by the derivative of the inside.',
+      steps: ['Let $u = 3x+1$, so $y = u^5$', "$\\dfrac{dy}{du} = 5u^4$, $\\dfrac{du}{dx} = 3$", "$\\dfrac{dy}{dx} = 5u^4 \\cdot 3 = 15(3x+1)^4$"],
+      keyIdea: '$\\dfrac{dy}{dx} = \\dfrac{dy}{du}\\cdot\\dfrac{du}{dx}$',
+    },
+    {
+      subskill: 'diff-product',
+      level: 2,
+      prompt: 'Differentiate $y = x^2 \\sin x$.',
+      options: [
+        { text: '$2x\\cos x$', why: 'The derivative of a product is not the product of the derivatives.' },
+        { text: '$2x\\sin x - x^2\\cos x$', why: 'The product rule adds the two terms — and $\\frac{d}{dx}\\sin x = +\\cos x$.' },
+        { text: '$x^2\\cos x$', why: 'Only one half of the product rule — the $2x\\sin x$ term is missing.' },
+        { text: '$2x\\sin x + x^2\\cos x$', why: "Product rule: $u'v + uv'$ with $u = x^2$, $v = \\sin x$." },
+      ],
+      correctIndex: 3,
+      hint: "Product rule: $(uv)' = u'v + uv'$.",
+      steps: ["$u = x^2 \\Rightarrow u' = 2x$", "$v = \\sin x \\Rightarrow v' = \\cos x$", "$y' = 2x\\sin x + x^2\\cos x$"],
+      keyIdea: "$(uv)' = u'v + uv'$",
+    },
+    {
+      subskill: 'diff-apply',
+      level: 3,
+      prompt: 'Find the equation of the tangent to $y = x^3 - 2x$ at $x = 1$.',
+      options: [
+        { text: '$y = 3x - 4$', why: "The $-2$ was dropped from $y' = 3x^2 - 2$, giving gradient 3 instead of 1." },
+        { text: '$y = x - 2$', why: "Point $(1, -1)$, gradient $y'(1) = 1$: $y + 1 = x - 1$." },
+        { text: '$y = x - 1$', why: 'The line must pass through $(1, -1)$, not $(1, 0)$.' },
+        { text: '$y = -x$', why: 'The $y$-value $(-1)$ was used as the gradient.' },
+      ],
+      correctIndex: 1,
+      hint: "You need a point and a gradient. Find $y(1)$ and $y'(1)$.",
+      steps: [
+        '$y(1) = 1 - 2 = -1$, so the point is $(1, -1)$',
+        "$y' = 3x^2 - 2 \\Rightarrow y'(1) = 1$",
+        '$y - (-1) = 1(x - 1) \\Rightarrow y = x - 2$',
+      ],
+      keyIdea: "Tangent: $y - y_1 = f'(x_1)(x - x_1)$",
+    },
+    {
+      subskill: 'diff-apply',
+      level: 3,
+      prompt: 'Where does $f(x) = x^3 - 6x^2 + 9x + 1$ have a local maximum?',
+      options: [
+        { text: '$x = 3$', why: "$f''(3) = 6 > 0$, so $x = 3$ is a local minimum." },
+        { text: '$x = 2$', why: "$f''(2) = 0$ — that is the point of inflection, and $f'(2) \\neq 0$." },
+        { text: '$x = 1$', why: "$f'(x) = 3(x-1)(x-3)$ and $f''(1) = -6 < 0$, so it is a maximum." },
+        { text: '$x = -1$', why: 'Factoring sign error: $x^2 - 4x + 3 = (x-1)(x-3)$.' },
+      ],
+      correctIndex: 2,
+      hint: "Solve $f'(x) = 0$, then use $f''$ to classify each stationary point.",
+      steps: [
+        "$f'(x) = 3x^2 - 12x + 9 = 3(x-1)(x-3)$",
+        'Stationary points at $x = 1$ and $x = 3$',
+        "$f''(x) = 6x - 12$: $f''(1) = -6 < 0$ (max), $f''(3) = 6 > 0$ (min)",
+      ],
+      keyIdea: "$f''(x) < 0$ at a stationary point means a local maximum.",
+    },
+    {
+      subskill: 'diff-power',
+      level: 1,
+      prompt: 'Differentiate $y = 6\\sqrt{x}$.',
+      options: [
+        { text: '$\\dfrac{3}{\\sqrt{x}}$', why: '$6x^{1/2} \\to 6\\cdot\\tfrac12 x^{-1/2} = 3x^{-1/2}$.' },
+        { text: '$6x^{-1/2}$', why: 'The power $\\tfrac12$ must also come down as a factor.' },
+        { text: '$4x^{3/2}$', why: 'That increases the power, which is integrating, not differentiating.' },
+        { text: '$3\\sqrt{x}$', why: 'The power must drop by one, from $\\tfrac12$ to $-\\tfrac12$.' },
+      ],
+      correctIndex: 0,
+      hint: 'Rewrite $\\sqrt{x}$ as $x^{1/2}$ first.',
+      steps: ['$y = 6x^{1/2}$', "$y' = 6\\cdot\\tfrac12 x^{-1/2} = 3x^{-1/2}$", '$= \\dfrac{3}{\\sqrt{x}}$'],
+      keyIdea: 'Rewrite roots as fractional powers: $\\sqrt{x} = x^{1/2}$.',
+    },
+    {
+      subskill: 'diff-power',
+      level: 1,
+      prompt: 'Find the gradient of $y = x^2 - 3x$ at $x = 4$.',
+      options: [
+        { text: '$4$', why: 'That is $y(4)$, the height of the curve, not its gradient.' },
+        { text: '$8$', why: 'The $-3$ from differentiating $-3x$ was dropped.' },
+        { text: '$5$', why: "$y' = 2x - 3$, so $y'(4) = 8 - 3 = 5$." },
+        { text: '$2x - 3$', why: 'That is the gradient function. Substitute $x = 4$ to get a number.' },
+      ],
+      correctIndex: 2,
+      hint: "Differentiate, then substitute $x = 4$ into $y'$.",
+      steps: ["$y' = 2x - 3$", "$y'(4) = 2(4) - 3 = 5$"],
+      keyIdea: "The gradient at a point is $f'(a)$, not $f(a)$.",
+    },
+    {
+      subskill: 'diff-product',
+      level: 2,
+      prompt: 'Differentiate $y = \\dfrac{x}{x + 1}$.',
+      options: [
+        { text: '$1$', why: 'Differentiating top and bottom separately gives $\\tfrac11$, but the quotient rule is needed.' },
+        { text: '$-\\dfrac{1}{(x+1)^2}$', why: "The numerator order was reversed. It is $u'v - uv'$." },
+        { text: '$\\dfrac{2x + 1}{(x+1)^2}$', why: 'The quotient rule subtracts in the numerator. It does not add.' },
+        { text: '$\\dfrac{1}{(x+1)^2}$', why: "$\\dfrac{(1)(x+1) - x(1)}{(x+1)^2} = \\dfrac{1}{(x+1)^2}$." },
+      ],
+      correctIndex: 3,
+      hint: "Quotient rule: $\\left(\\dfrac{u}{v}\\right)' = \\dfrac{u'v - uv'}{v^2}$.",
+      steps: ["$u = x,\\ u' = 1$; $v = x + 1,\\ v' = 1$", "$y' = \\dfrac{(1)(x+1) - x(1)}{(x+1)^2}$", '$= \\dfrac{1}{(x+1)^2}$'],
+      keyIdea: "$\\left(\\dfrac{u}{v}\\right)' = \\dfrac{u'v - uv'}{v^2}$",
+    },
+    {
+      subskill: 'diff-chain',
+      level: 2,
+      prompt: 'Differentiate $y = e^{x^2}$.',
+      options: [
+        { text: '$e^{x^2}$', why: 'The exponential stays the same, but the chain rule also multiplies by the derivative of $x^2$.' },
+        { text: '$2xe^{x^2}$', why: 'Outer: $e^{u}$. Inner: $\\tfrac{d}{dx}x^2 = 2x$.' },
+        { text: '$x^2e^{x^2 - 1}$', why: 'The power rule does not apply to exponentials, because the variable is in the exponent.' },
+        { text: '$2xe^{2x}$', why: 'Only multiply by the inner derivative. The exponent itself stays $x^2$.' },
+      ],
+      correctIndex: 1,
+      hint: 'Let $u = x^2$. What is $\\dfrac{d}{du}e^u$?',
+      steps: ['Let $u = x^2$, so $y = e^u$', "$\\dfrac{dy}{du} = e^u$ and $\\dfrac{du}{dx} = 2x$", "$\\dfrac{dy}{dx} = 2xe^{x^2}$"],
+      keyIdea: '$\\dfrac{d}{dx}e^{g(x)} = g\'(x)\\,e^{g(x)}$',
+    },
+    {
+      subskill: 'diff-chain',
+      level: 3,
+      prompt: 'Differentiate $y = x(2x - 1)^3$ and fully factorise.',
+      options: [
+        { text: '$6x(2x-1)^2$', why: 'Only half of the product rule. The $(2x-1)^3$ term is missing.' },
+        { text: '$(2x-1)^2(5x-1)$', why: 'The inner derivative $2$ from the chain rule was left out.' },
+        { text: '$(2x-1)^2(8x-1)$', why: '$(2x-1)^3 + 6x(2x-1)^2 = (2x-1)^2(2x - 1 + 6x)$.' },
+        { text: '$6(2x-1)^2$', why: 'That multiplies the derivatives of the two factors. Use the product rule instead.' },
+      ],
+      correctIndex: 2,
+      hint: 'Product rule first, then use the chain rule on $(2x - 1)^3$.',
+      steps: [
+        "$u = x,\\ u' = 1$; $v = (2x-1)^3,\\ v' = 3(2x-1)^2\\cdot 2 = 6(2x-1)^2$",
+        "$y' = (2x-1)^3 + 6x(2x-1)^2$",
+        '$= (2x-1)^2\\big[(2x-1) + 6x\\big] = (2x-1)^2(8x-1)$',
+      ],
+      keyIdea: 'Combine rules step by step: product rule outside, chain rule inside.',
+    },
+    {
+      subskill: 'diff-apply',
+      level: 3,
+      prompt: 'A rectangle has perimeter $20$. What is the largest possible area?',
+      options: [
+        { text: '$100$', why: 'Used $x + y = 20$. The perimeter is $2(x + y)$, so $x + y = 10$.' },
+        { text: '$5$', why: 'That is the best side length. The question asks for the area.' },
+        { text: '$50$', why: 'From $2x + 2y = 20$ you get $y = 10 - x$, not $20 - 2x$.' },
+        { text: '$25$', why: "$A = x(10 - x)$ and $A' = 10 - 2x = 0$ at $x = 5$, so $A = 25$." },
+      ],
+      correctIndex: 3,
+      hint: 'Write the area as a function of one side using the perimeter, then set $A\'(x) = 0$.',
+      steps: ['$2x + 2y = 20 \\Rightarrow y = 10 - x$', "$A = x(10 - x) = 10x - x^2$, so $A' = 10 - 2x$", "$A' = 0 \\Rightarrow x = 5$, $A = 25$ ($A'' = -2 < 0$, so a maximum)"],
+      keyIdea: 'Optimisation: use the constraint to reduce to one variable, then differentiate.',
+    },
+  ],
+}
+
+export function bankQuestions(topic: TopicId): Question[] {
+  return BANK[topic].map((q, i) => ({ ...q, topic, id: `bank-${topic}-${i}`, source: 'bank' }))
+}
+
+/**
+ * Picks a random round from the bank matching the requested levels (e.g. [1, 1, 2, 2, 3, 3]),
+ * preferring focus subskills, so each new game and each difficulty gets a different mix.
+ */
+export function pickBankRound(topic: TopicId, levels: readonly number[], focus: string[] = []): Question[] {
+  const pool = bankQuestions(topic).sort(() => Math.random() - 0.5)
+  pool.sort((a, b) => Number(focus.includes(b.subskill)) - Number(focus.includes(a.subskill)))
+  const picked: Question[] = []
+  for (const level of levels) {
+    const idx = pool.findIndex((q) => q.level === level)
+    const at = idx >= 0 ? idx : 0
+    if (pool.length) picked.push(...pool.splice(at, 1))
+  }
+  return picked.sort((a, b) => a.level - b.level)
+}
